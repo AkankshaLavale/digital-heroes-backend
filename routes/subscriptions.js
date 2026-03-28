@@ -7,6 +7,47 @@ const CharityContribution = require('../models/CharityContribution');
 const auth = require('../middleware/auth');
 const router = express.Router();
 
+// Plan configurations
+const planCache = { monthly: null, yearly: null };
+
+const PLANS_CONFIG = {
+  monthly: { name: 'Monthly Plan', amount: 99900, period: 'monthly' },
+  yearly: { name: 'Yearly Plan', amount: 999900, period: 'yearly' },
+};
+
+async function getOrCreatePlan(planType) {
+  if (planCache[planType]) return planCache[planType];
+  
+  const config = PLANS_CONFIG[planType];
+  if (!config) throw new Error('Invalid plan type');
+
+  // Fetch up to 100 existing plans
+  const plans = await razorpay.plans.all({ count: 100 });
+  const existingPlan = plans.items.find(
+    p => p.item.amount === config.amount && p.period === config.period
+  );
+  
+  if (existingPlan) {
+    planCache[planType] = existingPlan.id;
+    return existingPlan.id;
+  }
+  
+  // Create if not found
+  const newPlan = await razorpay.plans.create({
+    period: config.period,
+    interval: 1,
+    item: {
+      name: config.name,
+      amount: config.amount,
+      currency: 'INR',
+      description: `${config.name} Subscription for Golf Charity`,
+    }
+  });
+  
+  planCache[planType] = newPlan.id;
+  return newPlan.id;
+}
+
 // GET /api/subscriptions/plans — available plans
 router.get('/plans', (req, res) => {
   res.json({
@@ -14,9 +55,8 @@ router.get('/plans', (req, res) => {
       {
         id: 'monthly',
         name: 'Monthly Plan',
-        price: 999, // in paise (₹9.99 or adjust as needed)
+        price: 999, // User visible price
         interval: 'monthly',
-        razorpayPlanId: process.env.RAZORPAY_PLAN_MONTHLY,
       },
       {
         id: 'yearly',
@@ -24,7 +64,6 @@ router.get('/plans', (req, res) => {
         price: 9999,
         interval: 'yearly',
         description: 'Save 17%!',
-        razorpayPlanId: process.env.RAZORPAY_PLAN_YEARLY,
       },
     ],
   });
@@ -34,12 +73,10 @@ router.get('/plans', (req, res) => {
 router.post('/create', auth, async (req, res) => {
   try {
     const { planType } = req.body; // 'monthly' | 'yearly'
-    const planId = planType === 'yearly'
-      ? process.env.RAZORPAY_PLAN_YEARLY
-      : process.env.RAZORPAY_PLAN_MONTHLY;
+    const planId = await getOrCreatePlan(planType);
 
     if (!planId) {
-      return res.status(400).json({ message: 'Plan not configured' });
+      return res.status(400).json({ message: 'Could not resolve Razorpay Plan' });
     }
 
     const subscription = await razorpay.subscriptions.create({
