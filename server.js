@@ -19,8 +19,9 @@ connectDB();
 
 // Middleware
 app.use(cors({
-  origin: true, 
-  credentials: true,
+  origin: "https://digital-heroes-frontend-phi.vercel.app",
+  methods: ["GET", "POST", "PUT", "DELETE"],
+  credentials: true
 }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
